@@ -82,7 +82,6 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
 
     original_nulls = prices.isnull().sum().sum()
     prices = prices.ffill(limit=5)
-    prices = prices.bfill(limit=2)
     filled_nulls = original_nulls - prices.isnull().sum().sum()
     flags['forward_filled_gaps'] = filled_nulls
 

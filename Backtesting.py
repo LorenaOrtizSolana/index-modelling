@@ -24,7 +24,7 @@ class Backtest:
         for i, rebalance_date in enumerate(rebalance_dates):
             prices_as_of = self.prices.loc[:rebalance_date].iloc[-1]
 
-            selected = selection_func(rebalance_date, prices_as_of)
+            selected = selection_func(rebalance_date, prices_as_of, self.prices)
 
             weights = weighting_func(selected, prices_as_of, rebalance_date)
 
