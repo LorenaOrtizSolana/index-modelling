@@ -16,7 +16,7 @@ class Backtest:
         rebalance_dates = self._get_rebalance_dates()
 
         daily_returns = pd.Series(index=self.prices.index, dtype=float)
-        all_weights = pd.DataFrame(0, index=self.prices.index, columns=self.tickers)
+        all_weights = pd.DataFrame(0.0, index=self.prices.index, columns=self.tickers)
         turnover_series = pd.Series(index=self.prices.index, dtype=float)
 
         prev_weights = pd.Series(0, index=self.tickers)
@@ -44,7 +44,7 @@ class Backtest:
 
             prev_weights = weights_series.copy()
 
-        all_weights = all_weights.fillna(method='ffill')
+        all_weights = all_weights.ffill()
 
         daily_returns = self._calculate_returns(all_weights)
 

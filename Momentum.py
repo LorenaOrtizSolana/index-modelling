@@ -14,7 +14,7 @@ def select_momentum(rebalance_date, prices_as_of, full_price_history,
     if len(historical) < 252:
         return []
 
-    monthly_prices = historical.resample('M').last()
+    monthly_prices = historical.resample('ME').last()
     monthly_returns = monthly_prices.pct_change()
 
     if len(monthly_returns) < lookback_months + skip_months + 1:

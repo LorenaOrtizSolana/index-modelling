@@ -1,7 +1,12 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-
+from Backtesting import Backtest
+import Momentum
+from Backtesting import Backtest
+from Momentum import select_momentum, weight_equal_momentum
+from MeanReverting import select_mean_reversion_etfs, weight_mean_reversion_scaled, run_mean_reversion_strategy
+from RiskParity import select_risk_parity_assets, weight_risk_parity
 
 def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
     flags = {
@@ -107,3 +112,67 @@ results = bt.run(
     lambda s, p, d: weight_equal_momentum(s, p, d)
 )
 """
+
+
+def run_complete_portfolio_comparison(tickers, start_date, end_date):
+    prices, flags = fetch_prices(tickers, start_date, end_date)
+
+    vix = yf.download('^VIX', start=start_date, end=end_date, progress=False)['Close']
+
+    bt_momentum = Backtest(prices, rebalance_freq='M', transaction_cost_bps=10)
+    bt_meanrev = Backtest(prices, rebalance_freq='W', transaction_cost_bps=5)
+    bt_riskparity = Backtest(prices, rebalance_freq='Q', transaction_cost_bps=5)
+
+    results_momentum = bt_momentum.run(
+        lambda d, p, hist: select_momentum(d, p, hist),
+        lambda s, p, d: weight_equal_momentum(s, p, d)
+    )
+
+    results_meanrev = run_mean_reversion_strategy(bt_meanrev, vix)
+
+    results_riskparity = bt_riskparity.run(
+        lambda d, p, hist: select_risk_parity_assets(p, d, hist),
+        lambda s, p, d: weight_risk_parity(s, p, d, bt_riskparity.prices)
+    )
+
+    comparison = pd.DataFrame({
+        'Momentum': results_momentum['diagnostics'],
+        'Mean Reversion': results_meanrev['diagnostics'],
+        'Risk Parity (Inv Vol)': results_riskparity['diagnostics']
+    }).T
+
+    print("=" * 60)
+    print("STRATEGY COMPARISON")
+    print("=" * 60)
+    print(comparison.round(4))
+
+    return {
+        'momentum': results_momentum,
+        'mean_reversion': results_meanrev,
+        'risk_parity': results_riskparity,
+        'comparison': comparison
+    }
+
+
+if __name__ == "__main__":
+    all_tickers = ['SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLV', 'TLT', 'GLD',
+                   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'JPM', 'V']
+
+    results = run_complete_portfolio_comparison(
+        tickers=all_tickers,
+        start_date='2020-01-01',
+        end_date='2024-12-31'
+    )
+
+    print("\n" + "=" * 60)
+    print("DETAILED DIAGNOSTICS")
+    print("=" * 60)
+
+    for strategy, data in results.items():
+        if strategy != 'comparison':
+            print(f"\n{strategy.upper()}:")
+            diag = data['diagnostics']
+            print(f"  Total Return: {diag['total_return']:.2%}")
+            print(f"  Sharpe Ratio: {diag['sharpe_ratio']:.2f}")
+            print(f"  Max Drawdown: {diag['max_drawdown_pct']:.2%}")
+            print(f"  Hit Rate: {diag['hit_rate']:.2%}")

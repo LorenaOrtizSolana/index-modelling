@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from scipy.optimize import root
 
 
 def select_risk_parity_assets(prices, rebalance_date, full_price_history,
@@ -57,28 +58,23 @@ def select_risk_parity_assets(prices, rebalance_date, full_price_history,
     return selected[:max_assets]
 
 
-def weight_risk_parity(selected_tickers, prices_as_of, rebalance_date,
-                       lookback_days=252, max_weight=0.4):
-    if len(selected_tickers) == 0:
-        return {}
+def weight_risk_parity(selected_tickers, prices_as_of, rebalance_date, prices,
+                       lookback_days=252):
 
-    inv_vol = 1 / select_risk_parity_assets.last_metadata['volatilities']
+    historical = prices[prices.index <= rebalance_date]
+    returns = historical[selected_tickers].pct_change().dropna()
 
-    weights = inv_vol / inv_vol.sum()
+    volatilities = returns.std() * np.sqrt(252)
+    n = len(selected_tickers)
 
-    weights = weights.clip(upper=max_weight)
-    weights = weights / weights.sum()
+    def objective(portfolio_vol):
+        weights = portfolio_vol / (n * volatilities)
+        return weights.sum() - 1
+
+    solution = root(objective, x0=0.1)
+    portfolio_vol = solution.x[0]
+
+    weights = portfolio_vol / (n * volatilities)
 
     return weights.to_dict()
 
-
-def run_risk_parity(self):
-    returns = self.prices.pct_change()
-    volatility = returns.rolling(60).std() * np.sqrt(252)
-
-    weights = 1 / volatility
-    weights = weights.div(weights.sum(axis=1), axis=0)
-
-    portfolio_returns = (weights.shift(1) * returns).sum(axis=1)
-
-    return portfolio_returns
