@@ -154,25 +154,57 @@ def run_complete_portfolio_comparison(tickers, start_date, end_date):
     }
 
 
-if __name__ == "__main__":
-    all_tickers = ['SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLV', 'TLT', 'GLD',
-                   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'JPM', 'V']
-
-    results = run_complete_portfolio_comparison(
-        tickers=all_tickers,
-        start_date='2020-01-01',
-        end_date='2024-12-31'
-    )
-
-    print("\n" + "=" * 60)
-    print("DETAILED DIAGNOSTICS")
-    print("=" * 60)
-
-    for strategy, data in results.items():
-        if strategy != 'comparison':
-            print(f"\n{strategy.upper()}:")
-            diag = data['diagnostics']
-            print(f"  Total Return: {diag['total_return']:.2%}")
-            print(f"  Sharpe Ratio: {diag['sharpe_ratio']:.2f}")
-            print(f"  Max Drawdown: {diag['max_drawdown_pct']:.2%}")
+if __name__ == "__main__":   
+    all_tickers = ['SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLV', 'TLT', 'GLD',  
+                   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'JPM', 'V']  
+  
+    periods = {  
+        '2010-2014': ('2010-01-01', '2014-12-31'),  
+        '2015-2019': ('2015-01-01', '2019-12-31'),  
+        '2020-2024': ('2020-01-01', '2024-12-31')  
+    }  
+  
+    all_results = {}  
+    all_detailed = {}  
+  
+    for period_name, (start, end) in periods.items():  
+        print(f"\n{'='*40}")  
+        print(f"TESTING PERIOD: {period_name}")  
+        print(f"{'='*40}")  
+  
+        results = run_complete_portfolio_comparison(  
+            tickers=all_tickers,  
+            start_date=start,  
+            end_date=end  
+        )  
+  
+        all_results[period_name] = results['comparison']  
+        all_detailed[period_name] = results  
+  
+    print("\n" + "="*60)  
+    print("PERFORMANCE ACROSS ALL PERIODS")  
+    print("="*60)  
+  
+    for period_name, comparison_df in all_results.items():  
+        print(f"\n{period_name}:")  
+        print(comparison_df[['annualized_return', 'sharpe_ratio', 'max_drawdown_pct', 'annual_turnover']].round(4))  
+  
+    print("\n" + "="*60)  
+    print("DETAILED DIAGNOSTICS BY PERIOD")  
+    print("="*60)  
+  
+    for period_name, results in all_detailed.items():  
+        print(f"\n{'='*40}")  
+        print(f"PERIOD: {period_name}")  
+        print(f"{'='*40}")  
+          
+        for strategy, data in results.items():  
+            if strategy != 'comparison':  
+                print(f"\n{strategy.upper()}:")  
+                diag = data['diagnostics']  
+                print(f"  Total Return: {diag['total_return']:.2%}")  
+                print(f"  Sharpe Ratio: {diag['sharpe_ratio']:.2f}")  
+                print(f"  Max Drawdown: {diag['max_drawdown_pct']:.2%}")  
+                print(f"  Hit Rate: {diag['hit_rate']:.2%}")  
+                print(f"  Annual Turnover: {diag['annual_turnover']:.2%}")  
             print(f"  Hit Rate: {diag['hit_rate']:.2%}")
