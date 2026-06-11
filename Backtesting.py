@@ -44,7 +44,7 @@ class Backtest:
 
             prev_weights = weights_series.copy()
 
-        all_weights = all_weights.ffill()
+        all_weights = all_weights.ffill() 
 
         daily_returns = self._calculate_returns(all_weights)
 

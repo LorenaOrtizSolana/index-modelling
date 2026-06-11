@@ -77,4 +77,3 @@ def weight_risk_parity(selected_tickers, prices_as_of, rebalance_date, prices,
     weights = portfolio_vol / (n * volatilities)
 
     return weights.to_dict()
-

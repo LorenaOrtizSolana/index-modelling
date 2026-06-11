@@ -2,11 +2,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from Backtesting import Backtest
-import Momentum
-from Backtesting import Backtest
 from Momentum import select_momentum, weight_equal_momentum
-from MeanReverting import select_mean_reversion_etfs, weight_mean_reversion_scaled, run_mean_reversion_strategy
-from RiskParity import select_risk_parity_assets, weight_risk_parity
+
 
 def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
     flags = {
@@ -20,10 +17,7 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
     print(f"Fetching data for {len(tickers)} tickers from {start_date} to {end_date}...")
 
     data = yf.download(tickers, start=start_date, end=end_date,
-                       progress=False,
-                       group_by='ticker')
-
-    print(f"Raw data shape: {data.shape}")
+                       progress=False, auto_adjust=True)
 
     if isinstance(data.columns, pd.MultiIndex):
         if 'Adj Close' in data.columns.levels[0]:
@@ -45,7 +39,7 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
     prices = prices[valid_columns]
 
     if flags['stocks_with_no_data']:
-        print(f"Removed {len(flags['stocks_with_no_data'])} tickers with no data: {flags['stocks_with_no_data']}")
+        print(f"Removed {len(flags['stocks_with_no_data'])} tickers with no data")
 
     if len(prices.columns) == 0:
         print("ERROR: No valid tickers found")
@@ -54,13 +48,13 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
     print(f"Extracted prices: {len(prices)} days, {len(prices.columns)} stocks")
 
     missing_by_date = prices.isnull().sum(axis=1)
-    holiday_mask = missing_by_date > (len(prices.columns) * 0.5)
+    holiday_mask = missing_by_date > (len(prices.columns) * 0.7)
     holiday_dates = prices.index[holiday_mask].tolist()
     flags['holidays_removed'] = holiday_dates
     prices = prices.loc[~holiday_mask]
 
     if holiday_dates:
-        print(f"Removed {len(holiday_dates)} holiday dates with >50% missing")
+        print(f"Removed {len(holiday_dates)} holiday dates")
 
     if flag_single_missing:
         for date in prices.index:
@@ -75,10 +69,9 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
         last_20_pct = int(len(prices) * 0.2)
         if last_20_pct < 5:
             last_20_pct = 5
-
         last_values = prices[ticker].iloc[-last_20_pct:]
 
-        if last_values.isnull().sum() > len(last_values) * 0.5:
+        if last_values.isnull().sum() > len(last_values) * 0.7:
             flags['delisted_stocks'].append(ticker)
             prices = prices.drop(columns=ticker)
 
@@ -86,7 +79,7 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
         print(f"Removed {len(flags['delisted_stocks'])} delisted stocks")
 
     original_nulls = prices.isnull().sum().sum()
-    prices = prices.ffill(limit=5)
+    prices = prices.ffill(limit=30)
     filled_nulls = original_nulls - prices.isnull().sum().sum()
     flags['forward_filled_gaps'] = filled_nulls
 
@@ -104,75 +97,125 @@ def fetch_prices(tickers, start_date, end_date, flag_single_missing=True):
 
     return prices, flags
 
-"""
-bt = Backtest(prices, rebalance_freq='M', transaction_cost_bps=10)
 
-results = bt.run(
-    lambda d, p: select_momentum(d, p, top_pct=0.3, lookback_days=252, skip_days=21),
-    lambda s, p, d: weight_equal_momentum(s, p, d)
-)
-"""
+def run_simple_parameter_sweep(prices):
+    results = []
 
+    rebalance_freqs = ['M', 'Q']
+    min_holdings = [0, 3, 6]
+    entry_buffers = [None, 0.25, 0.30]
 
-def run_complete_portfolio_comparison(tickers, start_date, end_date):
-    prices, flags = fetch_prices(tickers, start_date, end_date)
+    total = len(rebalance_freqs) * len(min_holdings) * len(entry_buffers)
+    print(f"\nTesting {total} combinations...")
 
-    vix = yf.download('^VIX', start=start_date, end=end_date, progress=False)['Close']
+    combo = 0
+    for rebalance_freq in rebalance_freqs:
+        for min_hold in min_holdings:
+            for entry_buffer in entry_buffers:
+                combo += 1
 
-    bt_momentum = Backtest(prices, rebalance_freq='M', transaction_cost_bps=10)
-    bt_meanrev = Backtest(prices, rebalance_freq='W', transaction_cost_bps=5)
-    bt_riskparity = Backtest(prices, rebalance_freq='Q', transaction_cost_bps=5)
+                exit_buffer = entry_buffer + 0.10 if entry_buffer is not None else None
 
-    results_momentum = bt_momentum.run(
-        lambda d, p, hist: select_momentum(d, p, hist),
-        lambda s, p, d: weight_equal_momentum(s, p, d)
-    )
+                bt = Backtest(prices, rebalance_freq=rebalance_freq, transaction_cost_bps=10)
 
-    results_meanrev = run_mean_reversion_strategy(bt_meanrev, vix)
+                try:
+                    res = bt.run(
+                        lambda d, p, hist: select_momentum(
+                            d, p, hist,
+                            lookback_months=12,
+                            top_pct=0.2,
+                            min_holding_months=min_hold,
+                            entry_top_pct=entry_buffer,
+                            exit_bottom_pct=exit_buffer
+                        ),
+                        lambda s, p, d: weight_equal_momentum(s, p, d)
+                    )
 
-    results_riskparity = bt_riskparity.run(
-        lambda d, p, hist: select_risk_parity_assets(p, d, hist),
-        lambda s, p, d: weight_risk_parity(s, p, d, bt_riskparity.prices)
-    )
+                    diag = res['diagnostics']
+                    results.append({
+                        'rebalance_freq': rebalance_freq,
+                        'min_holding_months': min_hold,
+                        'entry_buffer': entry_buffer if entry_buffer else 'none',
+                        'exit_buffer': exit_buffer if exit_buffer else 'none',
+                        'annual_return': diag['annualized_return'],
+                        'annual_vol': diag['annualized_volatility'],
+                        'sharpe': diag['sharpe_ratio'],
+                        'max_drawdown': diag['max_drawdown_pct'],
+                        'annual_turnover': diag['annual_turnover'],
+                        'hit_rate': diag['hit_rate'],
+                        'total_return': diag['total_return'],
+                        'avg_daily_return': diag['avg_daily_return'],
+                        'worst_day': diag['worst_day'],
+                        'best_day': diag['best_day']
+                    })
 
-    comparison = pd.DataFrame({
-        'Momentum': results_momentum['diagnostics'],
-        'Mean Reversion': results_meanrev['diagnostics'],
-        'Risk Parity (Inv Vol)': results_riskparity['diagnostics']
-    }).T
+                    print(f"  {combo}/{total}: freq={rebalance_freq}, min_hold={min_hold}, "
+                          f"entry={entry_buffer} -> Sharpe={diag['sharpe_ratio']:.2f}, "
+                          f"Turnover={diag['annual_turnover']:.1%}")
 
+                except Exception as e:
+                    print(f"Error: {e}")
+                    continue
+
+    df = pd.DataFrame(results)
+
+    print("\n" + "=" * 60)
+    print("PARAMETER SWEEP RESULTS")
     print("=" * 60)
-    print("STRATEGY COMPARISON")
-    print("=" * 60)
-    print(comparison.round(4))
 
-    return {
-        'momentum': results_momentum,
-        'mean_reversion': results_meanrev,
-        'risk_parity': results_riskparity,
-        'comparison': comparison
-    }
+    best = df.loc[df['sharpe'].idxmax()]
+    print(f"\nBEST SHARPE: {best['sharpe']:.2f}")
+    print(f"   Rebalance: {best['rebalance_freq']}, Min Hold: {best['min_holding_months']}m, "
+          f"Entry Buffer: {best['entry_buffer']}")
+    print(f"   Turnover: {best['annual_turnover']:.1%}, Return: {best['annual_return']:.1%}, "
+          f"Drawdown: {best['max_drawdown']:.1%}")
+
+    lowest = df.loc[df['annual_turnover'].idxmin()]
+    print(f"\nLOWEST TURNOVER: {lowest['annual_turnover']:.1%}")
+    print(f"   Sharpe: {lowest['sharpe']:.2f}, Min Hold: {lowest['min_holding_months']}m")
+
+    print("\nIMPACT OF MIN HOLDING PERIOD:")
+    print(df.groupby('min_holding_months')[['annual_turnover', 'sharpe', 'annual_return']].mean().round(4))
+
+    print("\nIMPACT OF ENTRY BUFFER:")
+    print(df.groupby('entry_buffer')[['annual_turnover', 'sharpe']].mean().round(4))
+
+    return df
 
 
 if __name__ == "__main__":
-    all_tickers = ['SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLV', 'TLT', 'GLD',
-                   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'JPM', 'V']
+    RUN_SWEEP = True
 
-    results = run_complete_portfolio_comparison(
-        tickers=all_tickers,
-        start_date='2020-01-01',
-        end_date='2024-12-31'
-    )
+    tickers = ['SPY', 'QQQ', 'IWM', 'XLF', 'XLE', 'XLV', 'TLT',
+               'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA']
 
-    print("\n" + "=" * 60)
-    print("DETAILED DIAGNOSTICS")
-    print("=" * 60)
+    prices, flags = fetch_prices(tickers, '2020-01-01', '2024-12-31')
 
-    for strategy, data in results.items():
-        if strategy != 'comparison':
-            print(f"\n{strategy.upper()}:")
-            diag = data['diagnostics']
-            print(f"  Total Return: {diag['total_return']:.2%}")
-            print(f"  Sharpe Ratio: {diag['sharpe_ratio']:.2f}")
-            print(f"  Max Drawdown: {diag['max_drawdown_pct']:.2%}")
-            print(f"  Hit Rate: {diag['hit_rate']:.2%}")
+    if RUN_SWEEP:
+        results_df = run_simple_parameter_sweep(prices)
+        results_df.to_csv('momentum_simple_sweep.csv', index=False)
+
+        print("\n" + "=" * 60)
+        print("FULL DIAGNOSTICS FOR BEST COMBINATION")
+        print("=" * 60)
+
+        best = results_df.loc[results_df['sharpe'].idxmax()]
+        print(f"\n  Rebalance Frequency:   {best['rebalance_freq']}")
+        print(f"  Min Holding Months:    {best['min_holding_months']}")
+        print(f"  Entry Buffer:          {best['entry_buffer']}")
+        print(f"  Exit Buffer:           {best['exit_buffer']}")
+        print(f"  Total Return:          {best['total_return']:.2%}")
+        print(f"  Annualized Return:     {best['annual_return']:.2%}")
+        print(f"  Annualized Volatility: {best['annual_vol']:.2%}")
+        print(f"  Sharpe Ratio:          {best['sharpe']:.3f}")
+        print(f"  Max Drawdown:          {best['max_drawdown']:.2%}")
+        print(f"  Annual Turnover:       {best['annual_turnover']:.2%}")
+        print(f"  Hit Rate:              {best['hit_rate']:.2%}")
+        print(f"  Avg Daily Return:      {best['avg_daily_return']:.4%}")
+        print(f"  Worst Day:             {best['worst_day']:.4%}")
+        print(f"  Best Day:              {best['best_day']:.4%}")
+
+        print("\nSaved to momentum_simple_sweep.csv")
+
+    else:
+        print("Running original comparison (requires MeanReverting, RiskParity modules)")
