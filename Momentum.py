@@ -14,13 +14,15 @@ def select_momentum(rebalance_date, prices_as_of, full_price_history,
     if len(historical) < 252:
         return []
 
-    monthly_prices = historical.resample('ME').last()
-    monthly_returns = monthly_prices.pct_change()
+    lookback_days = (lookback_months + skip_months) * 21
+    start_date = rebalance_date - timedelta(days=lookback_days)
+    window = historical.loc[start_date:rebalance_date]
 
     if len(monthly_returns) < lookback_months + skip_months + 1:
         return []
 
-    momentum_returns = monthly_returns.iloc[-(lookback_months + skip_months):-skip_months].sum()
+    momentum_returns = (window.iloc[-1] / window.iloc[0]) - 1
+    momentum_returns = momentum_returns.dropna()
 
     current_prices = historical.iloc[-1]
     price_filter = current_prices >= min_price
